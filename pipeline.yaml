@@ -1,0 +1,124 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"tekton.dev/v1","kind":"Pipeline","metadata":{"annotations":{},"name":"ci-cd-pipeline","namespace":"sn-labs-manbirsehmi"},"spec":{"params":[{"default":"https://github.com/your-org/your-repo.git","description":"Git repository URL to clone","name":"repo-url","type":"string"},{"default":"main","description":"Git revision (branch, tag, or SHA)","name":"revision","type":"string"},{"default":".","description":"Path to build context relative to repo root","name":"context-dir","type":"string"},{"default":"Dockerfile","description":"Dockerfile path relative to context-dir","name":"dockerfile","type":"string"},{"default":"demo-app","description":"Application name for deployment (used later if you add deploy)","name":"app-name","type":"string"},{"default":"image-registry.openshift-image-registry.svc:5000/$(context.pipelineRun.namespace)/demo-app:latest","description":"Full image name to build \u0026 push","name":"build-image","type":"string"},{"default":"false","description":"Whether to verify TLS when pushing image (true/false)","name":"tls-verify","type":"string"}],"tasks":[{"name":"cleanup","taskRef":{"name":"cleanup"},"workspaces":[{"name":"source","workspace":"output"}]},{"name":"git-clone","params":[{"name":"url","value":"$(params.repo-url)"},{"name":"revision","value":"$(params.revision)"},{"name":"deleteExisting","value":"true"}],"runAfter":["cleanup"],"taskRef":{"kind":"ClusterTask","name":"git-clone"},"workspaces":[{"name":"output","workspace":"output"}]},{"name":"flake8","params":[{"name":"args","value":"."}],"runAfter":["git-clone"],"taskRef":{"name":"flake8"},"workspaces":[{"name":"source","workspace":"output"}]},{"name":"nose-tests","runAfter":["flake8"],"taskRef":{"name":"nose"},"workspaces":[{"name":"source","workspace":"output"}]},{"name":"buildah","params":[{"name":"IMAGE","value":"$(params.build-image)"},{"name":"DOCKERFILE","value":"$(params.dockerfile)"},{"name":"CONTEXT","value":"$(params.context-dir)"},{"name":"TLSVERIFY","value":"$(params.tls-verify)"}],"runAfter":["nose-tests"],"taskRef":{"kind":"ClusterTask","name":"buildah"},"workspaces":[{"name":"source","workspace":"output"}]}],"workspaces":[{"name":"output"}]}}
+  creationTimestamp: "2026-02-11T11:40:57Z"
+  generation: 1
+  name: ci-cd-pipeline
+  namespace: sn-labs-manbirsehmi
+  resourceVersion: "2642105284"
+  uid: 7922d001-ff41-4426-b174-f61bb7dd5e69
+spec:
+  params:
+  - default: https://github.com/your-org/your-repo.git
+    description: Git repository URL to clone
+    name: repo-url
+    type: string
+  - default: main
+    description: Git revision (branch, tag, or SHA)
+    name: revision
+    type: string
+  - default: .
+    description: Path to build context relative to repo root
+    name: context-dir
+    type: string
+  - default: Dockerfile
+    description: Dockerfile path relative to context-dir
+    name: dockerfile
+    type: string
+  - default: demo-app
+    description: Application name for deployment (used later if you add deploy)
+    name: app-name
+    type: string
+  - default: image-registry.openshift-image-registry.svc:5000/$(context.pipelineRun.namespace)/demo-app:latest
+    description: Full image name to build & push
+    name: build-image
+    type: string
+  - default: "false"
+    description: Whether to verify TLS when pushing image (true/false)
+    name: tls-verify
+    type: string
+  tasks:
+  - name: cleanup
+    taskRef:
+      kind: Task
+      name: cleanup
+    workspaces:
+    - name: source
+      workspace: output
+  - name: git-clone
+    params:
+    - name: url
+      value: $(params.repo-url)
+    - name: revision
+      value: $(params.revision)
+    - name: deleteExisting
+      value: "true"
+    runAfter:
+    - cleanup
+    taskRef:
+      kind: ClusterTask
+      name: git-clone
+    workspaces:
+    - name: output
+      workspace: output
+  - name: flake8
+    params:
+    - name: args
+      value: .
+    runAfter:
+    - git-clone
+    taskRef:
+      kind: Task
+      name: flake8
+    workspaces:
+    - name: source
+      workspace: output
+  - name: nose-tests
+    runAfter:
+    - flake8
+    taskRef:
+      kind: Task
+      name: nose
+    workspaces:
+    - name: source
+      workspace: output
+  - name: buildah
+    params:
+    - name: IMAGE
+      value: $(params.build-image)
+    - name: DOCKERFILE
+      value: $(params.dockerfile)
+    - name: CONTEXT
+      value: $(params.context-dir)
+    - name: TLSVERIFY
+      value: $(params.tls-verify)
+    runAfter:
+    - nose-tests
+    taskRef:
+      kind: ClusterTask
+      name: buildah
+    workspaces:
+    - name: source
+      workspace: output
+  - name: deploy
+    runAfter:
+    - buildah
+    taskRef:
+      kind: ClusterTask
+      name: openshift-client
+    params:
+    - name: SCRIPT
+      value: |
+        set -e
+        # Create (or update) a Deployment using the image built by buildah
+        oc create deployment $(params.app-name) \
+          --image=$(params.build-image) \
+          --dry-run=client -o yaml | oc apply -f -
+        # (Optional) Expose a Service and a Route if your lab needs external URL
+        # oc expose deployment/$(params.app-name) --port=8080 || true
+        # oc expose svc/$(params.app-name) || true
+  workspaces:
+  - name: output
